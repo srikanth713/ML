@@ -1,58 +1,68 @@
-
 from flask import Flask, request, jsonify
 import joblib
 import pandas as pd
 
 app = Flask(__name__)
 
-# Load the trained model and scaler
+# Load model & scaler
 try:
     model = joblib.load('logistic_regression_model.pkl')
     scaler = joblib.load('standard_scaler.pkl')
-    print("Model and scaler loaded successfully.")
+    print("✅ Model and scaler loaded successfully.")
 except Exception as e:
-    print(f"Error loading model or scaler: {e}")
+    print(f"❌ Error loading model or scaler: {e}")
     model = None
     scaler = None
 
+# Feature list (IMPORTANT)
+FEATURE_NAMES = [
+    'Pregnancies', 'Glucose', 'BloodPressure',
+    'SkinThickness', 'Insulin', 'BMI',
+    'DiabetesPedigreeFunction', 'Age'
+]
+
 @app.route('/')
 def home():
-    return "Logistic Regression API is running! Send POST requests to /predict."
+    return "✅ API is running. Use POST /predict"
 
 @app.route('/predict', methods=['POST'])
 def predict():
     if model is None or scaler is None:
-        return jsonify({'error': 'Model or scaler not loaded'}), 500
+        return jsonify({'error': 'Model not loaded properly'}), 500
 
     try:
-        data = request.get_json(force=True)
+        data = request.get_json()
 
-        # Ensure input data has the correct feature names and order
-        # Based on your training data, the features are:
-        # Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction, Age
-        feature_names = ['Pregnancies', 'Glucose', 'BloodPressure', 'SkinThickness', 'Insulin', 'BMI', 'DiabetesPedigreeFunction', 'Age']
+        # 🔒 Validate input
+        if not data:
+            return jsonify({'error': 'No input data provided'}), 400
 
-        # Convert input dictionary to a pandas DataFrame
-        # It's important that the order of columns matches the training data
-        input_df = pd.DataFrame([data], columns=feature_names)
+        missing = [f for f in FEATURE_NAMES if f not in data]
+        if missing:
+            return jsonify({'error': f'Missing fields: {missing}'}), 400
 
-        # Scale the input features
+        # Convert to DataFrame safely
+        input_data = {k: float(data[k]) for k in FEATURE_NAMES}
+        input_df = pd.DataFrame([input_data])
+
+        # Scale
         scaled_input = scaler.transform(input_df)
 
-        # Make prediction
-        prediction = model.predict(scaled_input)
-        prediction_proba = model.predict_proba(scaled_input)
+        # Predict
+        prediction = model.predict(scaled_input)[0]
+        probability = model.predict_proba(scaled_input)[0]
 
-        # Return prediction as JSON
         return jsonify({
-            'prediction': int(prediction[0]),
-            'probability_no_diabetes': prediction_proba[0][0],
-            'probability_diabetes': prediction_proba[0][1]
+            'prediction': int(prediction),
+            'probability_no_diabetes': float(probability[0]),
+            'probability_diabetes': float(probability[1])
         })
+
+    except ValueError:
+        return jsonify({'error': 'Invalid data type. All inputs must be numbers'}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 400
+        return jsonify({'error': str(e)}), 500
+
 
 if __name__ == '__main__':
-    # In a production environment, you might use a more robust web server like Gunicorn or uWSGI
-    # For local development, debug=True provides useful error messages and auto-reloading
     app.run(host='0.0.0.0', port=5000, debug=True)
